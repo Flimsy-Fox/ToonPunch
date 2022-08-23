@@ -1,5 +1,6 @@
 ﻿Shader "Flimsy Fox/ToonPunchv0.1"
 {
+    Properties
     {
 		[HideInInspector] shader_is_using_thry_editor ("", Float) = 0
 		[HideInInspector] shader_master_label ("<color=#00ff00ff>Flimsy Fox PBR 1.1.0</color>", Float) = 0
