@@ -1,4 +1,4 @@
-﻿Shader "Flimsy Fox/ToonPunchv0.1"
+﻿Shader "Flimsy Fox/ToonPunchv0.2"
 {
     Properties
     {
@@ -10,7 +10,6 @@
 		
 		[HideInInspector] m_mainOptions("Shader Settings", Float) = 0
 		_NumSamples ("Number of samples", Range(1, 256)) = 128
-		_LightMult ("Lighting Multiplier", Range(0, 5)) = 1
 		[Toggle(_)]_EnableRefl ("Reflections Toggle", Float) = 1
 		
 		[HideInInspector]m_start_Albedo("Albedo", Float) = 0
@@ -31,10 +30,10 @@
 		[HideInInspector]m_end_Roughness("Roughness", Float) = 0
 		
 		[HideInInspector]m_start_Normals("Normals", Float) = 0
-		_BumpMap ("Normal", 2D) = "(0,0,0,1)" {}
-		_Normal1 ("Normal 2", 2D) = "(0,0,0,1)" {}
-		[Toggle(_)] _MakeDisplacement ("Displacement map", Float) = 0
-		_DisplacementMult ("Distance (mm)", Float) = 0
+		[Toggle(_)]_Normal1Toggle ("Normal", Float) = 0
+		_BumpMap ("", 2D) = "(0,0,0,1)" {}
+		[Toggle(_)]_Normal2Toggle ("Normal 2", Float) = 0
+		_Normal1 ("", 2D) = "(0,0,0,1)" {}
 		[HideInInspector]m_end_Normals("Normals", Float) = 0
 		
 		[HideInInspector]m_start_Emission("Emission", Float) = 0
@@ -48,15 +47,6 @@
 		_GlowInTheDarkMax ("Glow in the dark max light", Float) = 0.25
 		[HideInInspector]m_end_Glow("Glow in the Dark", Float) = 0
 		[HideInInspector]m_end_Emission("Emission", Float) = 0
-		
-		[HideInInspector]m_start_AudioLink("AudioLink", Float) = 0
-		[HideInInspector]_AudioLink ("AudioLink Texture", 2D) = "black" {}
-		[Toggle(_)]_AudioLinkEnable ("Enable AudioLink", Float) = 0
-		[Enum(Local, 0, UV, 1)] _AudioLinkSpace("Coordinate Space", Float) = 0
-		_Height ("Height (Meters)", Float) = 2
-		_AudioLinkKey ("AudioLink Color Key", Color) = (0.5,0.5,0.5,1)
-		_AudioLinkKeyRange ("AudioLink Key Range", Range(0.0, 1.0)) = 0.5
-		[HideInInspector]m_end_AudioLink("AudioLink", Float) = 0
     }
 	
 	CustomEditor "Thry.ShaderEditor"
@@ -73,8 +63,6 @@
 			CGPROGRAM
 
 			#pragma vertex vert
-			#pragma require geometry
-			#pragma geometry Geometry
 			#pragma fragment frag
 			#pragma glsl
 			#pragma target 3.0
@@ -84,7 +72,6 @@
 			#include "Lighting.cginc"
 			#include "AutoLight.cginc"
 			#include "UnityStandardUtils.cginc"
-			#include "Assets/Flimsy Fox/Resources/AudioLink/Shaders/AudioLink.cginc"
 			#include "UnityLightingCommon.cginc"
 			
 			static const float PI = 3.14159265f;
@@ -95,7 +82,6 @@
 			
 			float _Height;
 			float _NumSamples;
-			float _LightMult;
 			float _UberVolumetricMode;
 			int _EnableRefl;
 			
@@ -111,10 +97,10 @@
 			float _RoughnessMult;
 			float _RoughnessAdd;
 			
+			int _Normal1Toggle;
 			sampler2D _BumpMap;
+			int _Normal2Toggle;
 			sampler2D _Normal1;
-			int _MakeDisplacement;
-			float _DisplacementMult;
 			
 			fixed4 _EmissionColor;
 			sampler2D _Emission;
@@ -123,11 +109,6 @@
 			
 			int _GlowInTheDarkEnable;
 			float _GlowInTheDarkMax;
-			
-			int _AudioLinkEnable;
-			int _AudioLinkSpace;
-			float4 _AudioLinkKey;
-			float _AudioLinkKeyRange;
 			
 			float3 uNormal;
 			float3 normalTest;
@@ -213,36 +194,6 @@
 				return saturate(dot(x,y) * f);
 			}
 			
-			float3 ConstructNormal(float3 v1, float3 v2, float3 v3)
-			{
-				return normalize(cross(v2 - v1, v3 - v1));
-			}
-			
-			float3x3 GetTangentSpace(float3 normal)
-			{
-				// Choose a helper vector for cross product
-				float3 helper = float3(1, 0, 0);
-				if(abs(normal.x) > 0.99f)
-					helper = float3(0, 0, 1);
-				
-				//Generate vectors
-				float3 tangent = normalize(cross(normal, helper));
-				float3 binormal = normalize(cross(normal, tangent));
-				return float3x3(tangent, binormal, normal);
-			}
-			
-			float3 SampleHemisphere(float3 normal, float alpha)
-			{
-				//Sample hemisphere, where alpha determines kind of sampling
-				float cosTheta = pow(rand(), 1.0f / (alpha + 1.0f));
-				float sinTheta = sqrt(1.0f - cosTheta * cosTheta);
-				float phi = 2 * PI * rand();
-				float3 tangentSpaceDir = float3(cos(phi) * sinTheta, sin(phi) * sinTheta, cosTheta);
-				
-				// Transform direction to world space
-				return mul(tangentSpaceDir, GetTangentSpace(normal));
-			}
-			
 			float3 SampleHemisphere(float3 v, float3 normal, float alpha)
 			{
 				//Redefine variables for easy copy-paste ;P
@@ -278,36 +229,6 @@
 				return pow(1000.0f, s * s);
 			}
 			
-			Varyings VertexOutput(Varyings o, float3 wpos, half3 wnrm, float2 uv)
-			{
-				//Varyings o;
-				//UNITY_INITIALIZE_OUTPUT(Varyings, o);
-
-			#if defined(PASS_CUBE_SHADOWCASTER)
-				// Cube map shadow caster pass: Transfer the shadow vector.
-				o.position = UnityWorldToClipPos(float4(wpos, 1));
-				o.shadow = wpos - _LightPositionRange.xyz;
-
-			#elif defined(UNITY_PASS_SHADOWCASTER)
-				// Default shadow caster pass: Apply the shadow bias.
-				float scos = dot(wnrm, normalize(UnityWorldSpaceLightDir(wpos)));
-				wpos -= wnrm * unity_LightShadowBias.z * sqrt(1 - scos * scos);
-				o.position = UnityApplyLinearShadowBias(UnityWorldToClipPos(float4(wpos, 1)));
-
-			#else
-				// GBuffer construction pass
-				o.worldPos = float4(wpos, 1);
-				o.vertex = UnityWorldToClipPos(float4(wpos, 1));
-				o.worldViewDir = normalize(UnityWorldSpaceViewDir(mul(unity_ObjectToWorld, o.worldPos)));
-				o.uv = uv;
-				
-				//Calculate normals
-				o.normal = wnrm;
-
-			#endif
-				return o;
-			}
-			
 			Varyings vert(appdata v)
 			{
 				Varyings o;
@@ -323,44 +244,13 @@
                 o.tspace0 = half3(wTangent.x, wBitangent.x, worldNormal.x);
                 o.tspace1 = half3(wTangent.y, wBitangent.y, worldNormal.y);
                 o.tspace2 = half3(wTangent.z, wBitangent.z, worldNormal.z);
-				/*
-				if(_MakeDisplacement)
-				{
-					fixed3 normal = UnpackNormal(float4(0.5,0.5,0.5,1));
-					//fixed3 baseNormal = UnpackNormal(float4(0.5,0.5,0.5,1));
-					fixed3 normalMap0 = tex2Dlod(_BumpMap, float4(v.uv, 0, 0));
-					fixed3 normalMap1 = tex2Dlod(_Normal1, float4(v.uv, 0, 0));
-					
-					int3 normal0Test = int3(normalMap0 * 255);
-					int3 normal1Test = int3(normalMap1 * 255);
-					
-					//normal = baseNormal;
-					
-					if(normal0Test.r != 55 || normal0Test.g != 55 
-						|| normal0Test.b != 55)
-					{
-						half3 normal0 = UnpackNormal(half4(normalMap0, 1));
-						normal = normalize(normal + normal0);
-					}
-					if(normal1Test.r != 55 || normal1Test.g != 55 
-						|| normal1Test.b != 55)
-					{
-						half3 normal1 = UnpackNormal(half4(normalMap1, 1));
-						normal = normalize(normal + normal1);
-					}
-					normal.x = dot(o.tspace0, normal);
-					normal.y = dot(o.tspace1, normal);
-					normal.z = dot(o.tspace2, normal);
-					
-					v.vertex.x += (normal.x - .5) * _DisplacementMult/1000;
-					v.vertex.y += (normal.y - .5) * _DisplacementMult/1000;
-					v.vertex.z += (normal.z - .5) * _DisplacementMult/1000;
-				}*/
 				
 				o.tangent = v.tangent;
 				o.normal = v.normal;
-				o.vertex = v.vertex;
+				o.worldPos = mul(unity_ObjectToWorld, v.vertex);
+				o.vertex = UnityObjectToClipPos(v.vertex);
 				o.screenPos = ComputeScreenPos(o.vertex);
+				o.worldViewDir = UNITY_MATRIX_IT_MV[2].xyz;
 				UNITY_TRANSFER_FOG(o,o.vertex);
 				#ifndef LIGHTMAP_OFF
 				o.uvLM = v.texcoord1.xy * unity_LightmapST.xy + unity_LightmapST.zw;
@@ -368,111 +258,6 @@
 				
 				TRANSFER_SHADOW(o)
 				return o;
-			}
-			
-			[maxvertexcount(15)]
-			void Geometry(
-				triangle Varyings input[3], uint pid : SV_PrimitiveID,
-				inout TriangleStream<Varyings> outStream
-			)
-			{
-				// Vertex inputs
-				
-				float3 wp0 = mul(unity_ObjectToWorld, input[0].vertex).xyz;
-				float3 wp1 = mul(unity_ObjectToWorld, input[1].vertex).xyz;
-				float3 wp2 = mul(unity_ObjectToWorld, input[2].vertex).xyz;
-
-				float2 uv0 = input[0].uv;
-				float2 uv1 = input[1].uv;
-				float2 uv2 = input[2].uv;
-				/*
-				if(_MakeDisplacement)
-				{
-					Varyings inputDispl[3];
-					
-					//Normals
-					half3 normal = half3(0,0,0);
-					half3 normalAdd = half3(0,0,0);
-					half3 baseNormal = UnpackNormal(float4(0.5,0.5,1,1));
-					float3 ext[3];
-					for(int i = 0; i < input.Length; ++i)
-					{
-						inputDispl[i] = input[i];
-						float3 normal0Tex = tex2Dlod(_BumpMap, float4(input[i].uv, 0, 0));
-						float3 normal1Tex = tex2Dlod(_Normal1, float4(input[i].uv, 0, 0));
-						
-						//Convert normal textures to 0-255 ranges for easy testing
-						int3 normal0Test = int3(normal0Tex * 255);
-						int3 normal1Test = int3(normal1Tex * 255);
-						
-						normal = baseNormal;
-						
-						if(normal0Test.r != 55 || normal0Test.g != 55 
-							|| normal0Test.b != 55)
-						{
-							half3 normal0 = UnpackNormal(half4(normal0Tex, 1));
-							normal = normalize(normal + normal0);
-						}
-						if(normal1Test.r != 55 || normal1Test.g != 55 
-							|| normal1Test.b != 55)
-						{
-							half3 normal1 = UnpackNormal(half4(normal1Tex, 1));
-							normal = normalize(normal + normal1);
-						}
-						
-						inputDispl[i].normal.x = dot(inputDispl[i].tspace0, -normal);
-						inputDispl[i].normal.y = dot(inputDispl[i].tspace1, -normal);
-						inputDispl[i].normal.z = dot(inputDispl[i].tspace2, -normal);
-					}
-					
-					// Extrusion points
-					float3 wp3 = wp0 + (inputDispl[0].normal - 0.5) * _DisplacementMult/1000;
-					float3 wp4 = wp1 + (inputDispl[0].normal - 0.5) * _DisplacementMult/1000;
-					float3 wp5 = wp2 + (inputDispl[0].normal - 0.5) * _DisplacementMult/1000;
-					
-					// Original triangle
-					float3 wn = ConstructNormal(wp0, wp1, wp2);
-					outStream.Append(VertexOutput(input[0], wp0, wn, uv0));
-					outStream.Append(VertexOutput(input[1], wp1, wn, uv1));
-					outStream.Append(VertexOutput(input[2], wp2, wn, uv2));
-					outStream.RestartStrip();
-
-					// Side faces
-					wn = ConstructNormal(wp3, wp0, wp4);
-					outStream.Append(VertexOutput(input[0], wp3, wn, uv0));
-					outStream.Append(VertexOutput(input[0], wp0, wn, uv0));
-					outStream.Append(VertexOutput(input[1], wp4, wn, uv1));
-					outStream.Append(VertexOutput(input[1], wp1, wn, uv1));
-					outStream.RestartStrip();
-
-					wn = ConstructNormal(wp4, wp1, wp5);
-					outStream.Append(VertexOutput(input[1], wp4, wn, uv1));
-					outStream.Append(VertexOutput(input[1], wp1, wn, uv1));
-					outStream.Append(VertexOutput(input[2], wp5, wn, uv2));
-					outStream.Append(VertexOutput(input[2], wp2, wn, uv2));
-					outStream.RestartStrip();
-
-					wn = ConstructNormal(wp5, wp2, wp3);
-					outStream.Append(VertexOutput(input[2], wp5, wn, uv2));
-					outStream.Append(VertexOutput(input[2], wp2, wn, uv2));
-					outStream.Append(VertexOutput(input[0], wp3, wn, uv0));
-					outStream.Append(VertexOutput(input[0], wp0, wn, uv0));
-					outStream.RestartStrip();
-				}
-				else{
-					float3 wn = ConstructNormal(wp0, wp1, wp2);
-					
-					outStream.Append(VertexOutput(input[0], wp0, wn, uv0));
-					outStream.Append(VertexOutput(input[1], wp1, wn, uv1));
-					outStream.Append(VertexOutput(input[2], wp2, wn, uv2));
-					outStream.RestartStrip();
-				}*/
-				float3 wn = ConstructNormal(wp0, wp1, wp2);
-					
-				outStream.Append(VertexOutput(input[0], wp0, wn, uv0));
-				outStream.Append(VertexOutput(input[1], wp1, wn, uv1));
-				outStream.Append(VertexOutput(input[2], wp2, wn, uv2));
-				outStream.RestartStrip();
 			}
 			
 			fixed4 frag(Varyings IN) : COLOR
@@ -501,14 +286,12 @@
 				
 				normal = baseNormal;
 				
-				if(normal0Test.r != 55 || normal0Test.g != 55 
-					|| normal0Test.b != 55 || normal0Test.a != 128)
+				if(_Normal1Toggle)
 				{
 					half3 normal0 = UnpackNormal(normal0Tex);
 					normal = normalize(normal + normal0);
 				}
-				if(normal1Test.r != 55 || normal1Test.g != 55 
-					|| normal1Test.b != 55 || normal1Test.a != 128)
+				if(_Normal2Toggle)
 				{
 					half3 normal1 = UnpackNormal(normal1Tex);
 					normal = normalize(normal + normal1);
@@ -551,12 +334,12 @@
 				
 				half nl = max(0, dot(uNormal, _WorldSpaceLightPos0.xyz));
 				
-				lighting = vertexLighting * nl * _LightMult;
+				lighting = vertexLighting * nl;
 				
 				lighting *= SHADOW_ATTENUATION(IN);
-				lighting += ShadeSH9(half4(uNormal,1)) * _LightMult;
+				lighting += ShadeSH9(half4(uNormal,1));
 				#ifndef LIGHTMAP_OFF
-				lighting += DecodeLightmap (UNITY_SAMPLE_TEX2D(unity_Lightmap, IN.uvLM)) * _LightMult;
+				lighting += DecodeLightmap (UNITY_SAMPLE_TEX2D(unity_Lightmap, IN.uvLM));
 				#endif
 				reflectionColor += float4(lighting, 0);
 				//reflectionColor = min(reflectionColor, 1);
@@ -569,18 +352,6 @@
 				
 				emissionMask = float4(tex2D (_EmissionMask, IN.uv));
 				emission = float4(tex2D (_Emission, IN.uv));
-				if(_AudioLinkEnable &&
-					testRange(emission.r, _AudioLinkKey.r, _AudioLinkKeyRange) &&
-					testRange(emission.g, _AudioLinkKey.g, _AudioLinkKeyRange) &&
-					testRange(emission.b, _AudioLinkKey.b, _AudioLinkKeyRange))
-				{
-					if(_AudioLinkSpace == 0)
-						uPos = IN.worldPos - origin;
-					else if(_AudioLinkSpace == 1)
-						uPos = IN.uv.y;
-					audioLink = AudioLinkData( ALPASS_AUDIOLINK + uint2( 0, (uPos - IN.vertex).y/_Height * 4. ) ).rrrr;
-					emission.rgba *= audioLink;
-				}
 				emission *= _EmissionColor * _EmissionStrength;
 				
 				float4 finalAlbedo = float4(0,0,0,0);
@@ -624,20 +395,34 @@
 				
 				float glowInTheDark;
 				if(_GlowInTheDarkEnable)
-					glowInTheDark = 1 - min(lighting + (1 - _GlowInTheDarkMax*_LightMult), 1);
+					glowInTheDark = 1 - min(lighting + (1 - _GlowInTheDarkMax), 1);
 				else
 					glowInTheDark = 1;
 				emission.r *= emissionMask.r;
 				emission.g *= emissionMask.g;
 				emission.b *= emissionMask.b;
-				
 				finalAlbedo += emission * emission.a * glowInTheDark;
-				/*finalAlbedo = float4(clampLoop(uPos.y/_Height, 1)
-					, clampLoop(uPos.y/_Height, 1)
-					,  clampLoop(uPos.y/_Height, 1), 1);*/
-				//finalAlbedo = float4(uNormal, 1);
 				
 				//POST PROCESSING and final calculations
+				
+				//Color compression
+				finalAlbedo = round((finalAlbedo*255)/8)*8/255;
+				
+				//Rim lighting
+				float3 a = uNormal;
+				float3 b = float3(IN.worldViewDir.x,-IN.worldViewDir.y,-IN.worldViewDir.z);
+				float aMag = sqrt(a.x*a.x + a.y*a.y + a.z*a.z);
+				float bMag = sqrt(b.x*b.x + b.y*b.y + b.z*b.z);
+				float angle = clamp(acos(dot(a, b)/(aMag*bMag)), 0, 1);
+				float rim = 1 - angle;
+				float rimCutoff = 0.05/4;
+				if(rim > rimCutoff)
+					rim = 1;
+				if(rim < rimCutoff)
+					rim = 0;
+				finalAlbedo *= float4(rim,rim,rim,1);
+				
+				
 				UNITY_APPLY_FOG(IN.fogCoord, finalAlbedo);
 				finalAlbedo.a = origAlbedo.a;
 				
